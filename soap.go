@@ -2,26 +2,31 @@ package soap
 
 import "encoding/xml"
 
-type SOAPEnvelope struct {
+// Envelope type
+type Envelope struct {
 	XMLName xml.Name `xml:"http://schemas.xmlsoap.org/soap/envelope/ Envelope"`
 
-	Body SOAPBody
+	Body Body
 }
 
-type SOAPHeader struct {
+// Header type
+type Header struct {
 	XMLName xml.Name `xml:"http://schemas.xmlsoap.org/soap/envelope/ Header"`
 
 	Header interface{}
 }
 
-type SOAPBody struct {
+// Body type
+type Body struct {
 	XMLName xml.Name `xml:"http://schemas.xmlsoap.org/soap/envelope/ Body"`
 
-	Fault   *SOAPFault  `xml:",omitempty"`
-	Content interface{} `xml:",omitempty"`
+	Fault               *Fault      `xml:",omitempty"`
+	Content             interface{} `xml:",omitempty"`
+	SOAPBodyContentType string      `xml:"-"`
 }
 
-type SOAPFault struct {
+// Fault type
+type Fault struct {
 	XMLName xml.Name `xml:"http://schemas.xmlsoap.org/soap/envelope/ Fault"`
 
 	Code   string `xml:"faultcode,omitempty"`
@@ -30,7 +35,8 @@ type SOAPFault struct {
 	Detail string `xml:"detail,omitempty"`
 }
 
-func (b *SOAPBody) UnmarshalXML(d *xml.Decoder, start xml.StartElement) error {
+// UnmarshalXML implement xml.Unmarshaler
+func (b *Body) UnmarshalXML(d *xml.Decoder, start xml.StartElement) error {
 	if b.Content == nil {
 		return xml.UnmarshalError("Content must be a pointer to a struct")
 	}
@@ -56,7 +62,7 @@ Loop:
 			if consumed {
 				return xml.UnmarshalError("Found multiple elements inside SOAP body; not wrapped-document/literal WS-I compliant")
 			} else if se.Name.Space == "http://schemas.xmlsoap.org/soap/envelope/" && se.Name.Local == "Fault" {
-				b.Fault = &SOAPFault{}
+				b.Fault = &Fault{}
 				b.Content = nil
 
 				err = d.DecodeElement(b.Fault, &se)
@@ -66,6 +72,7 @@ Loop:
 
 				consumed = true
 			} else {
+				b.SOAPBodyContentType = se.Name.Local
 				if err = d.DecodeElement(b.Content, &se); err != nil {
 					return err
 				}
@@ -80,6 +87,6 @@ Loop:
 	return nil
 }
 
-func (f *SOAPFault) Error() string {
+func (f *Fault) Error() string {
 	return f.String
 }
