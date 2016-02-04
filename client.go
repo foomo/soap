@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/xml"
 	"io/ioutil"
-	"log"
 	"net"
 	"net/http"
 	"time"
@@ -15,15 +14,6 @@ var ClientDialTimeout = time.Duration(30 * time.Second)
 
 // UserAgent is the default user agent
 var UserAgent = "go-soap-0.1"
-
-// Verbose be verbose
-var Verbose = false
-
-func l(m ...interface{}) {
-	if Verbose {
-		log.Println(m...)
-	}
-}
 
 // XMLMarshaller lets you inject your favourite custom xml implementation
 type XMLMarshaller interface {
@@ -94,7 +84,7 @@ func (s *Client) Call(soapAction string, request, response interface{}) (httpRes
 		req.SetBasicAuth(s.auth.Login, s.auth.Password)
 	}
 
-	req.Header.Add("Content-Type", "text/xml; charset=\"utf-8\"")
+	req.Header.Add("Content-Type", SOAPContentType)
 	req.Header.Set("User-Agent", UserAgent)
 
 	if soapAction != "" {

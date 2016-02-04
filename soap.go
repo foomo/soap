@@ -1,6 +1,20 @@
 package soap
 
-import "encoding/xml"
+import (
+	"encoding/xml"
+	"log"
+)
+
+const SOAPContentType = "application/soap+xml; charset=\"utf-8\""
+
+// Verbose be verbose
+var Verbose = false
+
+func l(m ...interface{}) {
+	if Verbose {
+		log.Println(m...)
+	}
+}
 
 // Envelope type
 type Envelope struct {

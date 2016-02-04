@@ -31,6 +31,9 @@ func (w *responseWriter) Header() http.Header {
 }
 func (w *responseWriter) Write(b []byte) (int, error) {
 	w.outputStarted = true
+	if Verbose {
+		l("writing response: " + string(b))
+	}
 	return w.w.Write(b)
 }
 
@@ -80,12 +83,23 @@ func (s *Server) handleError(err error, w http.ResponseWriter) {
 		w.WriteHeader(http.StatusInternalServerError)
 		w.Write([]byte("could not marshal soap fault for: " + err.Error() + " xmlError: " + xmlErr.Error()))
 	} else {
+		sendSOAPHeader(w)
 		w.Write(xmlBytes)
 	}
 }
 
-func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func sendSOAPHeader(w http.ResponseWriter) {
+	w.Header().Add("Content-Type", SOAPContentType)
+}
 
+func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	soapAction := r.Header.Get("SOAPAction")
+	l("ServeHTTP method:", r.Method, ", path:", r.URL.Path, ", SOAPAction", "\""+soapAction+"\"")
+	// we have a valid request time to call the handler
+	w = &responseWriter{
+		w:             w,
+		outputStarted: false,
+	}
 	switch r.Method {
 	case "POST":
 		l("incoming POST")
@@ -96,8 +110,6 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		soapAction := r.Header.Get("SOAPAction")
-		l("SOAPAction", "\""+soapAction+"\"")
 		actionHandlers, ok := s.handlers[soapAction]
 		if !ok {
 			s.handleError(errors.New("unknown action \""+soapAction+"\""), w)
@@ -138,19 +150,14 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		l("request", jsonDump(envelope))
 
-		// we have a valid request time to call the handler
-		responseWriter := &responseWriter{
-			w:             w,
-			outputStarted: false,
-		}
-		response, err := actionHandler.handler(request, responseWriter, r)
+		response, err := actionHandler.handler(request, w, r)
 		if err != nil {
 			l("action handler threw up")
 			s.handleError(err, w)
 			return
 		}
 		l("result", jsonDump(response))
-		if !responseWriter.outputStarted {
+		if !w.(*responseWriter).outputStarted {
 			responseEnvelope := &Envelope{
 				Body: Body{
 					Content: response,
@@ -160,6 +167,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				s.handleError(errors.New("could not marshal response:: "+err.Error()), w)
 			}
+			sendSOAPHeader(w)
 			w.Write(xmlBytes)
 		} else {
 			l("action handler sent its own output")
@@ -167,8 +175,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	default:
 		// this will be a soap fault !?
-		w.Write([]byte("this is a soap service - you have to POST soap requests\n"))
-		w.Write([]byte("invalid method: " + r.Method))
+		s.handleError(errors.New("this is a soap service - you have to POST soap requests"), w)
 	}
 }
 
