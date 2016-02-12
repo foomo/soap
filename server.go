@@ -123,7 +123,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			},
 		}
 
-		err = xml.Unmarshal(soapRequestBytes, &probeEnvelope)
+		err = s.Marshaller.Unmarshal(soapRequestBytes, &probeEnvelope)
 		if err != nil {
 			s.handleError(errors.New("could not probe soap body content:: "+err.Error()), w)
 			return
