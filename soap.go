@@ -5,7 +5,8 @@ import (
 	"log"
 )
 
-const SOAPContentType = "application/soap+xml; charset=\"utf-8\""
+//var SOAPContentType = "application/soap+xml; charset=\"utf-8\""
+var SOAPContentType = "text/xml; charset=\"utf-8\""
 
 // Verbose be verbose
 var Verbose = false
@@ -19,8 +20,8 @@ func l(m ...interface{}) {
 // Envelope type
 type Envelope struct {
 	XMLName xml.Name `xml:"http://schemas.xmlsoap.org/soap/envelope/ Envelope"`
-
-	Body Body
+	Header  Header
+	Body    Body
 }
 
 // Header type

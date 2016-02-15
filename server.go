@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"encoding/xml"
 	"errors"
+	"fmt"
 	"io/ioutil"
 	"net/http"
 )
@@ -138,6 +139,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		request := actionHandler.requestFactory()
 		envelope := &Envelope{
+			Header: Header{},
 			Body: Body{
 				Content: request,
 			},
@@ -168,6 +170,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				s.handleError(errors.New("could not marshal response:: "+err.Error()), w)
 			}
 			sendSOAPHeader(w)
+			w.Header().Set("Content-Length", fmt.Sprint(len(xmlBytes)))
 			w.Write(xmlBytes)
 		} else {
 			l("action handler sent its own output")
