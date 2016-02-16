@@ -84,13 +84,14 @@ func (s *Server) handleError(err error, w http.ResponseWriter) {
 		w.WriteHeader(http.StatusInternalServerError)
 		w.Write([]byte("could not marshal soap fault for: " + err.Error() + " xmlError: " + xmlErr.Error()))
 	} else {
-		sendSOAPHeader(w)
+		sendSOAPHeader(w, len(xmlBytes))
 		w.Write(xmlBytes)
 	}
 }
 
-func sendSOAPHeader(w http.ResponseWriter) {
+func sendSOAPHeader(w http.ResponseWriter, contentLength int) {
 	w.Header().Add("Content-Type", SOAPContentType)
+	w.Header().Add("Content-Length", fmt.Sprint(contentLength))
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -169,8 +170,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				s.handleError(errors.New("could not marshal response:: "+err.Error()), w)
 			}
-			sendSOAPHeader(w)
-			w.Header().Set("Content-Length", fmt.Sprint(len(xmlBytes)))
+			sendSOAPHeader(w, len(xmlBytes))
 			w.Write(xmlBytes)
 		} else {
 			l("action handler sent its own output")

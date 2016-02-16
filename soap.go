@@ -5,7 +5,7 @@ import (
 	"log"
 )
 
-//var SOAPContentType = "application/soap+xml; charset=\"utf-8\""
+// SOAPContentType configurable soap content type
 var SOAPContentType = "text/xml; charset=\"utf-8\""
 
 // Verbose be verbose
