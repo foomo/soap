@@ -73,12 +73,12 @@ func (s *Client) Call(soapAction string, request, response interface{}) (httpRes
 
 	xmlBytes, err := s.Marshaller.Marshal(envelope)
 	if err != nil {
-		return
+		panic(err)
 	}
 
 	req, err := http.NewRequest("POST", s.url, bytes.NewBuffer(xmlBytes))
 	if err != nil {
-		return
+		panic(err)
 	}
 	if s.auth != nil {
 		req.SetBasicAuth(s.auth.Login, s.auth.Password)
@@ -100,13 +100,13 @@ func (s *Client) Call(soapAction string, request, response interface{}) (httpRes
 	l("POST to", s.url, "with", string(xmlBytes))
 	httpResponse, err = client.Do(req)
 	if err != nil {
-		return
+		panic(err)
 	}
 	defer httpResponse.Body.Close()
 
 	rawbody, err := ioutil.ReadAll(httpResponse.Body)
 	if err != nil {
-		return
+		panic(err)
 	}
 	if len(rawbody) == 0 {
 		l("empty response")
@@ -118,13 +118,12 @@ func (s *Client) Call(soapAction string, request, response interface{}) (httpRes
 	respEnvelope.Body = Body{Content: response}
 	err = xml.Unmarshal(rawbody, respEnvelope)
 	if err != nil {
-		return
+		panic(err)
 	}
 
 	fault := respEnvelope.Body.Fault
 	if fault != nil {
-		err = fault
-		return
+		panic(fault)
 	}
 	return
 }
