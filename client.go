@@ -77,12 +77,12 @@ func (s *Client) Call(soapAction string, request, response interface{}) (httpRes
 
 	xmlBytes, err := s.Marshaller.Marshal(envelope)
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 
 	req, err := http.NewRequest("POST", s.url, bytes.NewBuffer(xmlBytes))
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 	if s.auth != nil {
 		req.SetBasicAuth(s.auth.Login, s.auth.Password)
@@ -104,14 +104,14 @@ func (s *Client) Call(soapAction string, request, response interface{}) (httpRes
 	l("POST to", s.url, "with\n", string(xmlBytes))
 	httpResponse, err = client.Do(req)
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 
 	defer httpResponse.Body.Close()
 
 	rawbody, err := ioutil.ReadAll(httpResponse.Body)
 	if err != nil {
-		panic(err)
+		return httpResponse, err
 	}
 	if len(rawbody) == 0 {
 		l("empty response")
@@ -124,7 +124,7 @@ func (s *Client) Call(soapAction string, request, response interface{}) (httpRes
 	}
 	if response == nil {
 		// This may be the case, if an empty response is expected, but a SOAP Fault is received.
-		// In this case unmarshalling of the rawbody would fail without using the Dummy, because response being a nil-pointer.
+		// In this case unmarshalling of the rawbody would fail without using the Dummy, because of response being a nil-pointer.
 		respEnvelope.Body = Body{Content: &Dummy{}}
 	} else {
 		respEnvelope.Body = Body{Content: response}
@@ -133,7 +133,6 @@ func (s *Client) Call(soapAction string, request, response interface{}) (httpRes
 	err = xml.Unmarshal(rawbody, respEnvelope)
 	if err != nil {
 		log.Println("soap/client.go Call(): COULD NOT UNMARSHAL")
-		panic(err)
 	}
 
 	fault := respEnvelope.Body.Fault
