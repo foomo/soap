@@ -9,6 +9,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -108,7 +109,6 @@ func (s *Client) Call(soapAction string, request, response interface{}) (httpRes
 	}
 
 	defer httpResponse.Body.Close()
-
 	rawbody, err := ioutil.ReadAll(httpResponse.Body)
 	if err != nil {
 		return httpResponse, err
@@ -118,7 +118,14 @@ func (s *Client) Call(soapAction string, request, response interface{}) (httpRes
 		return
 	}
 
-	l("response", string(rawbody))
+	// Check is there is garbage before actual soap message
+	i := strings.Index(string(rawbody), "<soap:Env")
+	if i != -1 {
+		rawbody = rawbody[i:]
+	}
+
+	l("\n\n## Response header:\n", httpResponse.Header)
+	l("\n\n## Response body:\n", string(rawbody))
 	respEnvelope := new(Envelope)
 	type Dummy struct {
 	}
