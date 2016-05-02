@@ -5,8 +5,11 @@ import (
 	"encoding/json"
 	"encoding/xml"
 	"errors"
+	"io"
 	"io/ioutil"
 	"log"
+	"mime"
+	"mime/multipart"
 	"net"
 	"net/http"
 	"strings"
@@ -109,29 +112,65 @@ func (s *Client) Call(soapAction string, request, response interface{}) (httpRes
 	}
 
 	defer httpResponse.Body.Close()
-	rawbody, err := ioutil.ReadAll(httpResponse.Body)
-	if err != nil {
-		return httpResponse, err
-	}
-	if len(rawbody) == 0 {
-		l("empty response")
-		return
-	}
-
-	// Check is there is garbage before actual soap message
-	i := strings.Index(string(rawbody), "<soap:Env")
-	if i != -1 {
-		rawbody = rawbody[i:]
-	}
 
 	l("\n\n## Response header:\n", httpResponse.Header)
+
+	mediaType, params, err := mime.ParseMediaType(httpResponse.Header.Get("Content-Type"))
+	if err != nil {
+		l("WARNING:", err)
+	}
+	l("MIMETYPE:", mediaType)
+	var rawbody = []byte{}
+	if strings.HasPrefix(mediaType, "multipart/") { // MULTIPART MESSAGE
+		mr := multipart.NewReader(httpResponse.Body, params["boundary"])
+		// If this is a multipart message, search for the soapy part
+		foundSoap := false
+		for {
+			p, err := mr.NextPart()
+			if err == io.EOF {
+				return nil, err
+			}
+			if err != nil {
+				return nil, err
+			}
+			slurp, err := ioutil.ReadAll(p)
+			if err != nil {
+				return nil, err
+			}
+			if strings.HasPrefix(string(slurp), "<soap") || strings.HasPrefix(string(slurp), "<SOAP") {
+				rawbody = slurp
+				foundSoap = true
+				break
+			}
+		}
+		if !foundSoap {
+			return nil, errors.New("Multipart message does contain a soapy part.")
+		}
+	} else { // SINGLE PART MESSAGE
+		rawbody, err = ioutil.ReadAll(httpResponse.Body)
+		if err != nil {
+			return httpResponse, err
+		}
+		// Check if there is a body and if yes if it's a soapy one.
+		if len(rawbody) == 0 {
+			l("INFO: Response Body is empty!")
+			return // Empty responses are ok. Sometimes Sometimes only a Status 200 or 202 comes back
+		}
+		// There is a message body, but it's not SOAP. We cannot handle this!
+		if !(strings.HasPrefix(string(rawbody), "<soap") || strings.HasPrefix(string(rawbody), "<SOAP")) {
+			return nil, errors.New("This is not a SOAP-Message: \n" + string(rawbody))
+		}
+
+	}
+
+	// We have an empty body or a SOAP body
 	l("\n\n## Response body:\n", string(rawbody))
 	respEnvelope := new(Envelope)
 	type Dummy struct {
 	}
+	// Response struct may be nil, e.g. if only a Status 200 is expected.
+	// In this case, we need a Dummy response to avoid a nil pointer if we receive a SOAP-Fault instead of the empty message (unmarshalling would fail)
 	if response == nil {
-		// This may be the case, if an empty response is expected, but a SOAP Fault is received.
-		// In this case unmarshalling of the rawbody would fail without using the Dummy, because of response being a nil-pointer.
 		respEnvelope.Body = Body{Content: &Dummy{}}
 	} else {
 		respEnvelope.Body = Body{Content: response}
