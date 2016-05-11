@@ -32,7 +32,7 @@ type defaultMarshaller struct {
 }
 
 func (dm *defaultMarshaller) Marshal(v interface{}) (xmlBytes []byte, err error) {
-	return xml.Marshal(v)
+	return xml.MarshalIndent(v, "", "	")
 }
 
 func (dm *defaultMarshaller) Unmarshal(xmlBytes []byte, v interface{}) error {
@@ -55,44 +55,66 @@ type BasicAuth struct {
 
 // Client generic SOAP client
 type Client struct {
-	url        string
-	tls        bool
-	auth       *BasicAuth
-	tr         *http.Transport
-	Marshaller XMLMarshaller
+	url         string
+	tls         bool
+	auth        *BasicAuth
+	tr          *http.Transport
+	Marshaller  XMLMarshaller
+	ContentType string
+	SoapVersion string
 }
 
-// NewClient constructor
+// NewClient constructor. SOAP 1.1 is used by default. Switch to SOAP 1.2 with UseSoap12()
 func NewClient(url string, auth *BasicAuth, tr *http.Transport) *Client {
 	return &Client{
-		url:        url,
-		auth:       auth,
-		tr:         tr,
-		Marshaller: newDefaultMarshaller(),
+		url:         url,
+		auth:        auth,
+		tr:          tr,
+		Marshaller:  newDefaultMarshaller(),
+		ContentType: SoapContentType11, // default is SOAP 1.1
+		SoapVersion: SoapVersion11,
 	}
 }
 
+func (c *Client) UseSoap11() {
+	c.SoapVersion = SoapVersion11
+	c.ContentType = SoapContentType11
+}
+
+func (c *Client) UseSoap12() {
+	c.SoapVersion = SoapVersion12
+	c.ContentType = SoapContentType12
+}
+
 // Call make a SOAP call
-func (s *Client) Call(soapAction string, request, response interface{}) (httpResponse *http.Response, err error) {
+func (c *Client) Call(soapAction string, request, response interface{}) (httpResponse *http.Response, err error) {
 
 	envelope := Envelope{}
 
 	envelope.Body.Content = request
 
-	xmlBytes, err := s.Marshaller.Marshal(envelope)
+	xmlBytes, err := c.Marshaller.Marshal(envelope)
+	// Adjust namespaces for SOAP 1.2
+	if c.SoapVersion == SoapVersion12 {
+		tmp := string(xmlBytes)
+		tmp = strings.Replace(tmp, NamespaceSoap11, NamespaceSoap12, -1)
+		xmlBytes = []byte(tmp)
+	}
 	if err != nil {
 		return nil, err
 	}
 
-	req, err := http.NewRequest("POST", s.url, bytes.NewBuffer(xmlBytes))
+	//l("SOAP Client Call() => Marshalled Request\n", string(xmlBytes))
+
+	req, err := http.NewRequest("POST", c.url, bytes.NewBuffer(xmlBytes))
 	if err != nil {
 		return nil, err
 	}
-	if s.auth != nil {
-		req.SetBasicAuth(s.auth.Login, s.auth.Password)
+	if c.auth != nil {
+		req.SetBasicAuth(c.auth.Login, c.auth.Password)
 	}
 
-	req.Header.Add("Content-Type", SOAPContentType)
+	req.Header.Add("Content-Type", c.ContentType)
 	req.Header.Set("User-Agent", UserAgent)
 
 	if soapAction != "" {
@@ -100,12 +122,12 @@ func (s *Client) Call(soapAction string, request, response interface{}) (httpRes
 	}
 
 	req.Close = true
-	tr := s.tr
+	tr := c.tr
 	if tr == nil {
 		tr = http.DefaultTransport.(*http.Transport)
 	}
 	client := &http.Client{Transport: tr}
-	l("POST to", s.url, "with\n", string(xmlBytes))
+	l("POST to", c.url, "with\n", string(xmlBytes))
 	httpResponse, err = client.Do(req)
 	if err != nil {
 		return nil, err
@@ -157,7 +179,8 @@ func (s *Client) Call(soapAction string, request, response interface{}) (httpRes
 			return // Empty responses are ok. Sometimes Sometimes only a Status 200 or 202 comes back
 		}
 		// There is a message body, but it's not SOAP. We cannot handle this!
-		if !(strings.HasPrefix(string(rawbody), "<soap") || strings.HasPrefix(string(rawbody), "<SOAP")) {
+		if !(strings.Contains(string(rawbody), "<soap") || strings.Contains(string(rawbody), "<SOAP")) {
+			l("This is not a SOAP-Message: \n" + string(rawbody))
 			return nil, errors.New("This is not a SOAP-Message: \n" + string(rawbody))
 		}
 
@@ -165,6 +188,13 @@ func (s *Client) Call(soapAction string, request, response interface{}) (httpRes
 
 	// We have an empty body or a SOAP body
 	l("\n\n## Response body:\n", string(rawbody))
+
+	// Our structs for Envelope, Header, Body and Fault are tagged with namespace for SOAP 1.1
+	// Therefore we must adjust namespaces for incoming SOAP 1.2 messages
+	tmp := string(rawbody)
+	tmp = strings.Replace(tmp, NamespaceSoap12, NamespaceSoap11, -1)
+	rawbody = []byte(tmp)
+
 	respEnvelope := new(Envelope)
 	type Dummy struct {
 	}
@@ -178,7 +208,7 @@ func (s *Client) Call(soapAction string, request, response interface{}) (httpRes
 
 	err = xml.Unmarshal(rawbody, respEnvelope)
 	if err != nil {
-		log.Println("soap/client.go Call(): COULD NOT UNMARSHAL")
+		log.Println("soap/client.go Call(): COULD NOT UNMARSHAL\n", err)
 	}
 
 	fault := respEnvelope.Body.Fault
@@ -194,5 +224,6 @@ func (s *Client) Call(soapAction string, request, response interface{}) (httpRes
 		return httpResponse, errors.New("Received SOAP Fault:\n" + string(jsonBytes))
 
 	}
+
 	return
 }

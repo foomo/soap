@@ -5,8 +5,18 @@ import (
 	"log"
 )
 
-// SOAPContentType configurable soap content type
-var SOAPContentType = "text/xml; charset=\"utf-8\""
+// SOAP 1.1 and SOAP 1.2 must expect different ContentTypes and Namespaces.
+
+const (
+	SoapVersion11 = "1.1"
+	SoapVersion12 = "1.2"
+
+	SoapContentType11 = "text/xml; charset=\"utf-8\""
+	SoapContentType12 = "application/soap+xml; charset=\"utf-8\""
+
+	NamespaceSoap11 = "http://schemas.xmlsoap.org/soap/envelope/"
+	NamespaceSoap12 = "http://www.w3.org/2003/05/soap-envelope"
+)
 
 // Verbose be verbose
 var Verbose = false

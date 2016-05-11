@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net/http"
+	"strings"
 )
 
 // OperationHandlerFunc runs the actual business logic - request is whatever you constructed in RequestFactoryFunc
@@ -44,17 +45,31 @@ func (w *responseWriter) WriteHeader(code int) {
 
 // Server a SOAP server, which can be run standalone or used as a http.HandlerFunc
 type Server struct {
-	handlers   map[string]map[string]*operationHander
-	Marshaller XMLMarshaller
+	handlers    map[string]map[string]*operationHander
+	Marshaller  XMLMarshaller
+	ContentType string
+	SoapVersion string
 }
 
 // NewServer construct a new SOAP server
 func NewServer() *Server {
 	s := &Server{
-		handlers:   make(map[string]map[string]*operationHander),
-		Marshaller: newDefaultMarshaller(),
+		handlers:    make(map[string]map[string]*operationHander),
+		Marshaller:  newDefaultMarshaller(),
+		ContentType: SoapContentType11,
+		SoapVersion: SoapVersion11,
 	}
 	return s
+}
+
+func (s *Server) UseSoap11() {
+	s.SoapVersion = SoapVersion11
+	s.ContentType = SoapContentType11
+}
+
+func (s *Server) UseSoap12() {
+	s.SoapVersion = SoapVersion12
+	s.ContentType = SoapContentType12
 }
 
 // HandleOperation register to handle an operation
@@ -84,13 +99,13 @@ func (s *Server) handleError(err error, w http.ResponseWriter) {
 		w.WriteHeader(http.StatusInternalServerError)
 		w.Write([]byte("could not marshal soap fault for: " + err.Error() + " xmlError: " + xmlErr.Error()))
 	} else {
-		sendSOAPHeader(w, len(xmlBytes))
+		addSOAPHeader(w, len(xmlBytes), s.ContentType)
 		w.Write(xmlBytes)
 	}
 }
 
-func sendSOAPHeader(w http.ResponseWriter, contentLength int) {
-	w.Header().Add("Content-Type", SOAPContentType)
+func addSOAPHeader(w http.ResponseWriter, contentLength int, contentType string) {
+	w.Header().Add("Content-Type", contentType)
 	w.Header().Add("Content-Length", fmt.Sprint(contentLength))
 }
 
@@ -106,6 +121,13 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case "POST":
 		l("incoming POST")
 		soapRequestBytes, err := ioutil.ReadAll(r.Body)
+		// Our structs for Envelope, Header, Body and Fault are tagged with namespace for SOAP 1.1
+		// Therefore we must adjust namespaces for incoming SOAP 1.2 messages
+		if s.SoapVersion == SoapVersion12 {
+			tmp := string(soapRequestBytes)
+			tmp = strings.Replace(tmp, NamespaceSoap12, NamespaceSoap11, -1)
+			soapRequestBytes = []byte(tmp)
+		}
 
 		if err != nil {
 			s.handleError(errors.New("could not read POST:: "+err.Error()), w)
@@ -167,10 +189,16 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				},
 			}
 			xmlBytes, err := s.Marshaller.Marshal(responseEnvelope)
+			// Adjust namespaces for SOAP 1.2
+			if s.SoapVersion == SoapVersion12 {
+				tmp := string(xmlBytes)
+				tmp = strings.Replace(tmp, NamespaceSoap11, NamespaceSoap12, -1)
+				xmlBytes = []byte(tmp)
+			}
 			if err != nil {
 				s.handleError(errors.New("could not marshal response:: "+err.Error()), w)
 			}
-			sendSOAPHeader(w, len(xmlBytes))
+			addSOAPHeader(w, len(xmlBytes), s.ContentType)
 			w.Write(xmlBytes)
 		} else {
 			l("action handler sent its own output")
