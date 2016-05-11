@@ -2,7 +2,6 @@ package soap
 
 import (
 	"bytes"
-	"encoding/json"
 	"encoding/xml"
 	"errors"
 	"io"
@@ -12,6 +11,7 @@ import (
 	"mime/multipart"
 	"net"
 	"net/http"
+	"reflect"
 	"strings"
 	"time"
 )
@@ -211,19 +211,84 @@ func (c *Client) Call(soapAction string, request, response interface{}) (httpRes
 		log.Println("soap/client.go Call(): COULD NOT UNMARSHAL\n", err)
 	}
 
+	// If we have a SOAP Fault, we return it as string in an error
 	fault := respEnvelope.Body.Fault
 	// If a SOAP Fault is received, try to jsonMarshal it and return it via the error.
 	if fault != nil {
-		log.Println("Received SOAP FAULT")
-		jsonBytes, err := json.MarshalIndent(respEnvelope.Body.Fault, "", "	")
-		if err != nil {
-			log.Println("soap/client.go Call(): could not jsonMarhal SOAP-Fault")
-			return httpResponse, err
-		}
-		log.Println(string(jsonBytes))
-		return httpResponse, errors.New("Received SOAP Fault:\n" + string(jsonBytes))
+		return nil, errors.New("SOAP FAULT:\n" + formatFaultXML(rawbody, 1))
+	}
+	return
+}
 
+// Format the Soap Fault as indented string. Namespaces are dropped for better readability.
+// Tags with lower level than start level is omitted
+func formatFaultXML(xmlBytes []byte, startLevel int) string {
+	indent := "	"
+	d := xml.NewDecoder(bytes.NewBuffer([]byte(xmlBytes)))
+
+	typeStart := reflect.TypeOf(xml.StartElement{})
+	typeEnd := reflect.TypeOf(xml.EndElement{})
+	typeCharData := reflect.TypeOf(xml.CharData{})
+
+	level := 0
+	out := bytes.NewBuffer([]byte(""))
+	ind := func() {
+		n := 0
+		if level-startLevel-1 > 0 {
+			n = level - startLevel - 1
+		}
+		out.Write([]byte(strings.Repeat(indent, n)))
+	}
+	lf := func() {
+		out.Write([]byte("\n"))
 	}
 
-	return
+	lastWasStart := false
+	lastWasCharData := false
+	lastWasEnd := false
+
+	for token, err := d.Token(); token != nil && err == nil; token, err = d.Token() {
+		r := reflect.ValueOf(token)
+		switch r.Type() {
+		case typeStart:
+			lastWasCharData = false
+			se := token.(xml.StartElement)
+			if lastWasEnd || lastWasStart {
+				lf()
+			}
+			lastWasStart = true
+			ind()
+			elementName := se.Name.Local
+
+			if level > startLevel {
+				out.WriteString("<" + elementName)
+				out.WriteString(">")
+			}
+
+			level++
+			lastWasEnd = false
+		case typeCharData:
+			lastWasCharData = true
+			_ = lastWasCharData
+			lastWasStart = false
+			cdata := token.(xml.CharData)
+			xml.EscapeText(out, cdata)
+			lastWasEnd = false
+		case typeEnd:
+			level--
+			if lastWasEnd {
+				lf()
+				ind()
+			}
+			lastWasEnd = true
+			lastWasStart = false
+			end := token.(xml.EndElement)
+			if level > startLevel {
+				endTagName := end.Name.Local
+				out.WriteString("</" + endTagName + ">")
+			}
+
+		}
+	}
+	return strings.Trim(string(out.Bytes()), " \n")
 }
