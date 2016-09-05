@@ -1,6 +1,7 @@
 package soap
 
 import (
+	"encoding/json"
 	"encoding/xml"
 	"log"
 )
@@ -24,6 +25,17 @@ var Verbose = false
 func l(m ...interface{}) {
 	if Verbose {
 		log.Println(m...)
+	}
+}
+
+func LogJSON(v interface{}) {
+	if Verbose {
+		json, err := json.MarshalIndent(v, "", " ")
+		if err != nil {
+			log.Println("Could not log json...")
+			return
+		}
+		log.Println(string(json))
 	}
 }
 

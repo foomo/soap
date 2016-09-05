@@ -128,6 +128,8 @@ func (c *Client) Call(soapAction string, request, response interface{}) (httpRes
 	}
 	client := &http.Client{Transport: tr}
 	l("POST to", c.url, "with\n", string(xmlBytes))
+	l("Header")
+	LogJSON(req.Header)
 	httpResponse, err = client.Do(req)
 	if err != nil {
 		return nil, err

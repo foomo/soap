@@ -72,8 +72,8 @@ func (s *Server) UseSoap12() {
 	s.ContentType = SoapContentType12
 }
 
-// HandleOperation register to handle an operation
-func (s *Server) HandleOperation(action string, messageType string, requestFactory RequestFactoryFunc, operationHandlerFunc OperationHandlerFunc) {
+// RegisterHandler register to handle an operation
+func (s *Server) RegisterHandler(action string, messageType string, requestFactory RequestFactoryFunc, operationHandlerFunc OperationHandlerFunc) {
 	_, ok := s.handlers[action]
 	if !ok {
 		s.handlers[action] = make(map[string]*operationHander)
