@@ -45,7 +45,7 @@ func (w *responseWriter) WriteHeader(code int) {
 
 // Server a SOAP server, which can be run standalone or used as a http.HandlerFunc
 type Server struct {
-	handlers    map[string]map[string]*operationHander
+	handlers    map[string]map[string]map[string]*operationHander
 	Marshaller  XMLMarshaller
 	ContentType string
 	SoapVersion string
@@ -54,7 +54,7 @@ type Server struct {
 // NewServer construct a new SOAP server
 func NewServer() *Server {
 	s := &Server{
-		handlers:    make(map[string]map[string]*operationHander),
+		handlers:    make(map[string]map[string]map[string]*operationHander),
 		Marshaller:  newDefaultMarshaller(),
 		ContentType: SoapContentType11,
 		SoapVersion: SoapVersion11,
@@ -73,12 +73,16 @@ func (s *Server) UseSoap12() {
 }
 
 // RegisterHandler register to handle an operation
-func (s *Server) RegisterHandler(action string, messageType string, requestFactory RequestFactoryFunc, operationHandlerFunc OperationHandlerFunc) {
-	_, ok := s.handlers[action]
-	if !ok {
-		s.handlers[action] = make(map[string]*operationHander)
+func (s *Server) RegisterHandler(path string, action string, messageType string, requestFactory RequestFactoryFunc, operationHandlerFunc OperationHandlerFunc) {
+	_, pathHandlersOK := s.handlers[path]
+	if !pathHandlersOK {
+		s.handlers[path] = make(map[string]map[string]*operationHander)
 	}
-	s.handlers[action][messageType] = &operationHander{
+	_, ok := s.handlers[path][action]
+	if !ok {
+		s.handlers[path][action] = make(map[string]*operationHander)
+	}
+	s.handlers[path][action][messageType] = &operationHander{
 		handler:        operationHandlerFunc,
 		requestFactory: requestFactory,
 	}
@@ -133,8 +137,12 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			s.handleError(errors.New("could not read POST:: "+err.Error()), w)
 			return
 		}
-
-		actionHandlers, ok := s.handlers[soapAction]
+		pathHandlers, pathHandlerOK := s.handlers[r.URL.Path]
+		if !pathHandlerOK {
+			s.handleError(errors.New("unknown path"), w)
+			return
+		}
+		actionHandlers, ok := pathHandlers[soapAction]
 		if !ok {
 			s.handleError(errors.New("unknown action \""+soapAction+"\""), w)
 			return
