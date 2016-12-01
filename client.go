@@ -94,15 +94,16 @@ func (c *Client) Call(soapAction string, request, response interface{}) (httpRes
 	envelope.Body.Content = request
 
 	xmlBytes, err := c.Marshaller.Marshal(envelope)
+	if err != nil {
+		return nil, err
+	}
 	// Adjust namespaces for SOAP 1.2
 	if c.SoapVersion == SoapVersion12 {
 		tmp := string(xmlBytes)
 		tmp = strings.Replace(tmp, NamespaceSoap11, NamespaceSoap12, -1)
 		xmlBytes = []byte(tmp)
 	}
-	if err != nil {
-		return nil, err
-	}
+	//log.Println(string(xmlBytes))
 
 	//l("SOAP Client Call() => Marshalled Request\n", string(xmlBytes))
 
@@ -185,7 +186,7 @@ func (c *Client) Call(soapAction string, request, response interface{}) (httpRes
 			l("This is not a SOAP-Message: \n" + string(rawbody))
 			return nil, errors.New("This is not a SOAP-Message: \n" + string(rawbody))
 		}
-
+		l("RAWBODY\n", string(rawbody))
 	}
 
 	// We have an empty body or a SOAP body

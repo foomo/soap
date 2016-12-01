@@ -108,9 +108,19 @@ func (s *Server) handleError(err error, w http.ResponseWriter) {
 	}
 }
 
+// WriteHeader first sets header like content-type and then writes the header
+func (s *Server) WriteHeader(w http.ResponseWriter, code int) {
+	setContentType(w, s.ContentType)
+	w.WriteHeader(code)
+}
+
+func setContentType(w http.ResponseWriter, contentType string) {
+	w.Header().Set("Content-Type", contentType)
+}
+
 func addSOAPHeader(w http.ResponseWriter, contentLength int, contentType string) {
-	w.Header().Add("Content-Type", contentType)
-	w.Header().Add("Content-Length", fmt.Sprint(contentLength))
+	setContentType(w, contentType)
+	w.Header().Set("Content-Length", fmt.Sprint(contentLength))
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
