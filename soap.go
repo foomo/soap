@@ -1,9 +1,7 @@
 package soap
 
 import (
-	"encoding/json"
 	"encoding/xml"
-	"log"
 )
 
 // SOAP 1.1 and SOAP 1.2 must expect different ContentTypes and Namespaces.
@@ -19,27 +17,13 @@ const (
 	NamespaceSoap12 = "http://www.w3.org/2003/05/soap-envelope"
 )
 
-// Verbose be verbose
-var Verbose = false
+var (
+	bNamespaceSoap11 = []byte("http://schemas.xmlsoap.org/soap/envelope/")
+	bNamespaceSoap12 = []byte("http://www.w3.org/2003/05/soap-envelope")
 
-func l(m ...interface{}) {
-	if Verbose {
-		log.Println(m...)
-	}
-}
+)
 
-func LogJSON(v interface{}) {
-	if Verbose {
-		json, err := json.MarshalIndent(v, "", " ")
-		if err != nil {
-			log.Println("Could not log json...")
-			return
-		}
-		log.Println(string(json))
-	}
-}
-
-// Envelope type
+// Envelope type `xml:"http://schemas.xmlsoap.org/soap/envelope/ Envelope"`
 type Envelope struct {
 	XMLName xml.Name `xml:"http://schemas.xmlsoap.org/soap/envelope/ Envelope"`
 	Header  Header

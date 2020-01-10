@@ -19,8 +19,8 @@ type FooResponse struct {
 }
 
 func main() {
-	soap.Verbose = true
-	client := soap.NewClient("http://127.0.0.1:8080/", nil, nil)
+	client := soap.NewClient("http://127.0.0.1:8080/", nil)
+	client.Log = log.Println // verbose
 	response := &FooResponse{}
 	httpResponse, err := client.Call("operationFoo", &FooRequest{Foo: "hello i am foo"}, response)
 	if err != nil {

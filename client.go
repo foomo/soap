@@ -4,23 +4,18 @@ import (
 	"bytes"
 	"encoding/xml"
 	"errors"
+	"fmt"
 	"io"
 	"io/ioutil"
-	"log"
 	"mime"
 	"mime/multipart"
-	"net"
 	"net/http"
 	"reflect"
 	"strings"
-	"time"
 )
 
-// ClientDialTimeout default timeout 30s
-var ClientDialTimeout = time.Duration(30 * time.Second)
-
 // UserAgent is the default user agent
-var UserAgent = "go-soap-0.1"
+const UserAgent = "go-soap-0.1"
 
 // XMLMarshaller lets you inject your favourite custom xml implementation
 type XMLMarshaller interface {
@@ -28,23 +23,14 @@ type XMLMarshaller interface {
 	Unmarshal(xml []byte, v interface{}) error
 }
 
-type defaultMarshaller struct {
-}
+type defaultMarshaller struct{}
 
-func (dm *defaultMarshaller) Marshal(v interface{}) (xmlBytes []byte, err error) {
+func (dm defaultMarshaller) Marshal(v interface{}) ([]byte, error) {
 	return xml.MarshalIndent(v, "", "	")
 }
 
-func (dm *defaultMarshaller) Unmarshal(xmlBytes []byte, v interface{}) error {
+func (dm defaultMarshaller) Unmarshal(xmlBytes []byte, v interface{}) error {
 	return xml.Unmarshal(xmlBytes, v)
-}
-
-func newDefaultMarshaller() XMLMarshaller {
-	return &defaultMarshaller{}
-}
-
-func dialTimeout(network, addr string) (net.Conn, error) {
-	return net.DialTimeout(network, addr, ClientDialTimeout)
 }
 
 // BasicAuth credentials for the client
@@ -55,24 +41,28 @@ type BasicAuth struct {
 
 // Client generic SOAP client
 type Client struct {
-	url         string
-	tls         bool
-	auth        *BasicAuth
-	tr          *http.Transport
-	Marshaller  XMLMarshaller
-	ContentType string
-	SoapVersion string
+	Log            func(...interface{}) // optional
+	url            string
+	tls            bool
+	auth           *BasicAuth
+	Marshaller     XMLMarshaller
+	ContentType    string
+	SoapVersion    string
+	HTTPClientDoFn func(req *http.Request) (*http.Response, error)
 }
 
-// NewClient constructor. SOAP 1.1 is used by default. Switch to SOAP 1.2 with UseSoap12()
-func NewClient(url string, auth *BasicAuth, tr *http.Transport) *Client {
+// NewClient constructor. SOAP 1.1 is used by default. Switch to SOAP 1.2 with
+// UseSoap12(). Argument rt can be nil and it will fall back to the default
+// http.Transport.
+func NewClient(url string, auth *BasicAuth) *Client {
 	return &Client{
-		url:         url,
-		auth:        auth,
-		tr:          tr,
-		Marshaller:  newDefaultMarshaller(),
-		ContentType: SoapContentType11, // default is SOAP 1.1
-		SoapVersion: SoapVersion11,
+		Log:            func(...interface{}) {}, // do nothing or add your fmt.Print* or log.*
+		url:            url,
+		auth:           auth,
+		Marshaller:     defaultMarshaller{},
+		ContentType:    SoapContentType11, // default is SOAP 1.1
+		SoapVersion:    SoapVersion11,
+		HTTPClientDoFn: http.DefaultClient.Do,
 	}
 }
 
@@ -86,12 +76,11 @@ func (c *Client) UseSoap12() {
 	c.ContentType = SoapContentType12
 }
 
-// Call make a SOAP call
-func (c *Client) Call(soapAction string, request, response interface{}) (httpResponse *http.Response, err error) {
-
-	envelope := Envelope{}
-
-	envelope.Body.Content = request
+// Call makes a SOAP call
+func (c *Client) Call(soapAction string, request, response interface{}) (*http.Response, error) {
+	envelope := Envelope{
+		Body: Body{Content: request},
+	}
 
 	xmlBytes, err := c.Marshaller.Marshal(envelope)
 	if err != nil {
@@ -99,15 +88,10 @@ func (c *Client) Call(soapAction string, request, response interface{}) (httpRes
 	}
 	// Adjust namespaces for SOAP 1.2
 	if c.SoapVersion == SoapVersion12 {
-		tmp := string(xmlBytes)
-		tmp = strings.Replace(tmp, NamespaceSoap11, NamespaceSoap12, -1)
-		xmlBytes = []byte(tmp)
+		xmlBytes = replaceSoap11to12(xmlBytes)
 	}
-	//log.Println(string(xmlBytes))
 
-	//l("SOAP Client Call() => Marshalled Request\n", string(xmlBytes))
-
-	req, err := http.NewRequest("POST", c.url, bytes.NewBuffer(xmlBytes))
+	req, err := http.NewRequest("POST", c.url, bytes.NewReader(xmlBytes))
 	if err != nil {
 		return nil, err
 	}
@@ -123,29 +107,24 @@ func (c *Client) Call(soapAction string, request, response interface{}) (httpRes
 	}
 
 	req.Close = true
-	tr := c.tr
-	if tr == nil {
-		tr = http.DefaultTransport.(*http.Transport)
-	}
-	client := &http.Client{Transport: tr}
-	l("POST to", c.url, "with\n", string(xmlBytes))
-	l("Header")
-	LogJSON(req.Header)
-	httpResponse, err = client.Do(req)
+
+
+	c.Log("POST to", c.url, "with\n", xmlBytes)
+	c.Log("Header", req.Header)
+	httpResponse, err := c.HTTPClientDoFn(req)
 	if err != nil {
 		return nil, err
 	}
-
 	defer httpResponse.Body.Close()
 
-	l("\n\n## Response header:\n", httpResponse.Header)
+	c.Log("\n\n## Response header:\n", httpResponse.Header)
 
 	mediaType, params, err := mime.ParseMediaType(httpResponse.Header.Get("Content-Type"))
 	if err != nil {
-		l("WARNING:", err)
+		c.Log("WARNING:", err)
 	}
-	l("MIMETYPE:", mediaType)
-	var rawbody = []byte{}
+	c.Log("MIMETYPE:", mediaType)
+	var rawBody []byte
 	if strings.HasPrefix(mediaType, "multipart/") { // MULTIPART MESSAGE
 		mr := multipart.NewReader(httpResponse.Body, params["boundary"])
 		// If this is a multipart message, search for the soapy part
@@ -153,7 +132,7 @@ func (c *Client) Call(soapAction string, request, response interface{}) (httpRes
 		for {
 			p, err := mr.NextPart()
 			if err == io.EOF {
-				return nil, err
+				break
 			}
 			if err != nil {
 				return nil, err
@@ -162,72 +141,67 @@ func (c *Client) Call(soapAction string, request, response interface{}) (httpRes
 			if err != nil {
 				return nil, err
 			}
-			if strings.HasPrefix(string(slurp), "<soap") || strings.HasPrefix(string(slurp), "<SOAP") {
-				rawbody = slurp
+			if bytes.HasPrefix(slurp, soapPrefixTagLC) || bytes.HasPrefix(slurp, soapPrefixTagUC) {
+				rawBody = slurp
 				foundSoap = true
 				break
 			}
 		}
 		if !foundSoap {
-			return nil, errors.New("Multipart message does contain a soapy part.")
+			return nil, errors.New("multipart message does contain a soapy part")
 		}
 	} else { // SINGLE PART MESSAGE
-		rawbody, err = ioutil.ReadAll(httpResponse.Body)
+		rawBody, err = ioutil.ReadAll(httpResponse.Body)
 		if err != nil {
-			return httpResponse, err
+			return httpResponse, err // return both
 		}
 		// Check if there is a body and if yes if it's a soapy one.
-		if len(rawbody) == 0 {
-			l("INFO: Response Body is empty!")
-			return // Empty responses are ok. Sometimes Sometimes only a Status 200 or 202 comes back
+		if len(rawBody) == 0 {
+			c.Log("INFO: Response Body is empty!")
+			return httpResponse, nil // Empty responses are ok. Sometimes Sometimes only a Status 200 or 202 comes back
 		}
 		// There is a message body, but it's not SOAP. We cannot handle this!
-		if !(strings.Contains(string(rawbody), "<soap") || strings.Contains(string(rawbody), "<SOAP")) {
-			l("This is not a SOAP-Message: \n" + string(rawbody))
-			return nil, errors.New("This is not a SOAP-Message: \n" + string(rawbody))
+		if !(bytes.Contains(rawBody, soapPrefixTagLC) || bytes.Contains(rawBody, soapPrefixTagUC)) {
+			c.Log("This is not a SOAP-Message: \n", rawBody)
+			return nil, errors.New("This is not a SOAP-Message: \n" + string(rawBody))
 		}
-		l("RAWBODY\n", string(rawbody))
+		c.Log("RAWBODY\n", rawBody)
 	}
 
 	// We have an empty body or a SOAP body
-	l("\n\n## Response body:\n", string(rawbody))
+	c.Log("\n\n## Response body:\n", rawBody)
 
-	// Our structs for Envelope, Header, Body and Fault are tagged with namespace for SOAP 1.1
-	// Therefore we must adjust namespaces for incoming SOAP 1.2 messages
-	tmp := string(rawbody)
-	tmp = strings.Replace(tmp, NamespaceSoap12, NamespaceSoap11, -1)
-	rawbody = []byte(tmp)
+	// Our structs for Envelope, Header, Body and Fault are tagged with namespace
+	// for SOAP 1.1. Therefore we must adjust namespaces for incoming SOAP 1.2
+	// messages
+	rawBody = replaceSoap12to11(rawBody)
 
 	respEnvelope := new(Envelope)
-	type Dummy struct {
-	}
-	// Response struct may be nil, e.g. if only a Status 200 is expected.
-	// In this case, we need a Dummy response to avoid a nil pointer if we receive a SOAP-Fault instead of the empty message (unmarshalling would fail)
+	// Response struct may be nil, e.g. if only a Status 200 is expected. In this
+	// case, we need a Dummy response to avoid a nil pointer if we receive a
+	// SOAP-Fault instead of the empty message (unmarshalling would fail).
 	if response == nil {
-		respEnvelope.Body = Body{Content: &Dummy{}}
+		respEnvelope.Body = Body{Content: &dummyContent{}} // must be a pointer in dummyContent
 	} else {
 		respEnvelope.Body = Body{Content: response}
 	}
-
-	err = xml.Unmarshal(rawbody, respEnvelope)
-	if err != nil {
-		log.Println("soap/client.go Call(): COULD NOT UNMARSHAL\n", err)
+	if err := xml.Unmarshal(rawBody, respEnvelope); err != nil {
+		return nil, fmt.Errorf("soap/client.go Call(): COULD NOT UNMARSHAL: %s\n", err)
 	}
 
-	// If we have a SOAP Fault, we return it as string in an error
-	fault := respEnvelope.Body.Fault
-	// If a SOAP Fault is received, try to jsonMarshal it and return it via the error.
-	if fault != nil {
-		return nil, errors.New("SOAP FAULT:\n" + formatFaultXML(rawbody, 1))
+	// If a SOAP Fault is received, try to jsonMarshal it and return it via the
+	// error.
+	if fault := respEnvelope.Body.Fault; fault != nil {
+		return nil, errors.New("SOAP FAULT:\n" + formatFaultXML(rawBody, 1))
 	}
-	return
+	return httpResponse, nil
 }
 
-// Format the Soap Fault as indented string. Namespaces are dropped for better readability.
-// Tags with lower level than start level is omitted
+// Format the Soap Fault as indented string. Namespaces are dropped for better
+// readability. Tags with lower level than start level is omitted.
 func formatFaultXML(xmlBytes []byte, startLevel int) string {
 	indent := "	"
-	d := xml.NewDecoder(bytes.NewBuffer([]byte(xmlBytes)))
+	d := xml.NewDecoder(bytes.NewBuffer(xmlBytes))
 
 	typeStart := reflect.TypeOf(xml.StartElement{})
 	typeEnd := reflect.TypeOf(xml.EndElement{})
@@ -294,4 +268,17 @@ func formatFaultXML(xmlBytes []byte, startLevel int) string {
 		}
 	}
 	return strings.Trim(string(out.Bytes()), " \n")
+}
+
+var (
+	soapPrefixTagUC = []byte("<SOAP")
+	soapPrefixTagLC = []byte("<soap")
+)
+
+func replaceSoap12to11(data []byte) []byte {
+	return bytes.ReplaceAll(data, bNamespaceSoap12, bNamespaceSoap11)
+}
+
+func replaceSoap11to12(data []byte) []byte {
+	return bytes.ReplaceAll(data, bNamespaceSoap11, bNamespaceSoap12)
 }

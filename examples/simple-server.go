@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/xml"
 	"fmt"
+	"log"
 	"net/http"
 
 	"github.com/foomo/soap"
@@ -22,11 +23,11 @@ type FooResponse struct {
 // RunServer run a little demo server
 func RunServer() {
 	soapServer := soap.NewServer()
-	soapServer.HandleOperation(
-		// SOAPAction
-		"operationFoo",
-		// tagname of soap body content
-		"fooRequest",
+	soapServer.Log = log.Println
+	soapServer.RegisterHandler(
+		"/pathTo",
+		"operationFoo", // SOAPAction
+		"fooRequest",   // tagname of soap body content
 		// RequestFactoryFunc - give the server sth. to unmarshal the request into
 		func() interface{} {
 			return &FooRequest{}
@@ -41,12 +42,10 @@ func RunServer() {
 			return
 		},
 	)
-	err := soapServer.ListenAndServe(":8080")
+	err := http.ListenAndServe(":8080", soapServer)
 	fmt.Println("exiting with error", err)
 }
 
 func main() {
-	// see what is going on
-	soap.Verbose = true
 	RunServer()
 }
