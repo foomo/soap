@@ -15,7 +15,7 @@ import (
 )
 
 // UserAgent is the default user agent
-const UserAgent = "go-soap-0.1"
+const userAgent = "go-soap-0.1"
 
 // XMLMarshaller lets you inject your favourite custom xml implementation
 type XMLMarshaller interface {
@@ -41,14 +41,16 @@ type BasicAuth struct {
 
 // Client generic SOAP client
 type Client struct {
-	Log            func(...interface{}) // optional
-	url            string
-	tls            bool
-	auth           *BasicAuth
-	Marshaller     XMLMarshaller
-	ContentType    string
-	SoapVersion    string
-	HTTPClientDoFn func(req *http.Request) (*http.Response, error)
+	Log             func(...interface{}) // optional
+	url             string
+	tls             bool
+	auth            *BasicAuth
+	Marshaller      XMLMarshaller
+	UserAgent       string            // optional, falls back to "go-soap-0.1"
+	ContentType     string            // optional, falls back to SOAP 1.1
+	RequestHeaderFn func(http.Header) // optional, allows to modify the request header before it gets submitted.
+	SoapVersion     string
+	HTTPClientDoFn  func(req *http.Request) (*http.Response, error)
 }
 
 // NewClient constructor. SOAP 1.1 is used by default. Switch to SOAP 1.2 with
@@ -100,15 +102,20 @@ func (c *Client) Call(soapAction string, request, response interface{}) (*http.R
 	}
 
 	req.Header.Add("Content-Type", c.ContentType)
-	req.Header.Set("User-Agent", UserAgent)
+	ua := c.UserAgent
+	if ua == "" {
+		ua = userAgent
+	}
+	req.Header.Set("User-Agent", ua)
 
 	if soapAction != "" {
 		req.Header.Add("SOAPAction", soapAction)
 	}
 
 	req.Close = true
-
-
+	if c.RequestHeaderFn != nil {
+		c.RequestHeaderFn(req.Header)
+	}
 	c.Log("POST to", c.url, "with\n", xmlBytes)
 	c.Log("Header", req.Header)
 	httpResponse, err := c.HTTPClientDoFn(req)

@@ -55,9 +55,15 @@ func TestClient_Call(t *testing.T) {
 				Login:    "test",
 				Password: "test",
 			})
+			c.UserAgent = "ncc-1701-d"
+			c.RequestHeaderFn = func(header http.Header) {
+				header.Set("X-Answer", "42")
+			}
 			c.HTTPClientDoFn = clientDoFn(func(r *http.Request) (*http.Response, error) {
 				haveBody, _ := ioutil.ReadAll(r.Body)
 				assert.Exactly(t, wantSOAPBody, haveBody)
+				assert.Exactly(t, "42", r.Header.Get("X-Answer"))
+				assert.Exactly(t, "ncc-1701-d", r.Header.Get("User-Agent"))
 				return &http.Response{
 					StatusCode: 200,
 					Body:       ioutil.NopCloser(bytes.NewReader(httpSOAPResponse)),
