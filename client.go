@@ -182,7 +182,7 @@ func (c *Client) Call(soapAction string, request, response interface{}) (httpRes
 			return // Empty responses are ok. Sometimes Sometimes only a Status 200 or 202 comes back
 		}
 		// There is a message body, but it's not SOAP. We cannot handle this!
-		if !(strings.Contains(string(rawbody), "<soap") || strings.Contains(string(rawbody), "<SOAP")) {
+		if !(strings.Contains(string(rawbody), "<soap") || strings.Contains(string(rawbody), "<SOAP") || strings.Contains(string(rawbody), "soap-envelope")) {
 			l("This is not a SOAP-Message: \n" + string(rawbody))
 			return nil, errors.New("This is not a SOAP-Message: \n" + string(rawbody))
 		}
